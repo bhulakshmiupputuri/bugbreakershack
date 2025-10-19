@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synergy Nexus - Connect. Fund. Build.</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons for professional icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom styles for a cleaner UI experience */
+        :root {
+            font-family: 'Inter', sans-serif;
+        }
+        .card-shadow {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card-shadow:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 20px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -5px rgba(0, 0, 0, 0.03);
+        }
+        .text-clip-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .nav-active {
+            background-color: theme('colors.indigo.600');
+            color: white;
+            font-weight: 600;
+        }
+        .nav-active i {
+            color: white !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    
+    <!-- TOP BAR - Role Selector and User Info -->
+    <div class="fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto flex justify-between items-center h-full px-4 sm:px-6 lg:px-8">
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center">
+                <i data-lucide="gem" class="w-6 h-6 mr-2 text-indigo-600"></i>
+                Synergy Nexus
+            </h1>
+            <div class="flex items-center space-x-6">
+                <div class="flex items-center space-x-2">
+                    <span class="font-medium text-gray-500 text-sm">Role:</span>
+                    <select id="role-selector" onchange="saveUserRole(this.value)" class="py-1 px-3 border border-gray-300 rounded-lg bg-gray-50 text-indigo-600 font-semibold text-sm focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                        <option value="Entrepreneur">Entrepreneur</option>
+                        <option value="Investor">Investor</option>
+                        <option value="Collaborator">Team Collaborator</option>
+                    </select>
+                </div>
+                <div class="text-right">
+                    <span id="current-role-display" class="text-sm font-bold text-indigo-600">Viewing as...</span>
+                    <p id="user-id-display" class="text-xs text-gray-400 mt-0.5">ID Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTAINER - Fixed Sidebar and Scrollable Content -->
+    <div class="flex pt-16 h-full">
+        
+        <!-- SIDEBAR NAVIGATION -->
+        <nav class="w-64 bg-white border-r border-gray-200 fixed h-full z-20 p-4 pt-8">
+            <h2 class="text-xs font-semibold uppercase text-gray-400 mb-4 px-3">Navigation</h2>
+            <ul class="space-y-2">
+                <li>
+                    <button id="nav-dashboard" onclick="navigateTo('dashboard')" class="w-full flex items-center px-3 py-2 text-gray-700 rounded-xl hover:bg-gray-100 transition duration-150">
+                        <i data-lucide="compass" class="w-5 h-5 mr-3 text-gray-500"></i>
+                        Discover
+                    </button>
+                </li>
+                <li>
+                    <button id="nav-create" onclick="navigateTo('create')" class="w-full flex items-center px-3 py-2 text-gray-700 rounded-xl hover:bg-gray-100 transition duration-150">
+                        <i data-lucide="plus-circle" class="w-5 h-5 mr-3 text-gray-500"></i>
+                        Create Opportunity
+                    </button>
+                </li>
+                <li>
+                    <button id="nav-profile" onclick="navigateTo('profile')" class="w-full flex items-center px-3 py-2 text-gray-700 rounded-xl hover:bg-gray-100 transition duration-150">
+                        <i data-lucide="user" class="w-5 h-5 mr-3 text-gray-500"></i>
+                        My Profile
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="flex-1 ml-64 p-8">
+            <div id="content-container" class="max-w-4xl mx-auto">
+                <!-- Dynamic content (Dashboard, Create Form, Profile) will be rendered here -->
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- GLOBAL STATE ---
+        let app, db, auth;
+        let userId = null;
+        let userRole = 'Entrepreneur'; // Default role
+        let currentView = 'dashboard'; // Initial view
+        const ROLE_COLLECTION = 'user_roles';
+
+        // --- FIREBASE INITIALIZATION AND AUTH ---
+
+        async function initializeFirebase() {
+            setLogLevel('Debug');
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+            if (Object.keys(firebaseConfig).length === 0) {
+                console.error("Firebase config is missing. Using mock data only.");
+                renderApp();
+                return;
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Sign in using custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        loadUserPreferences(userId, appId);
+                    } else {
+                        userId = crypto.randomUUID(); 
+                        document.getElementById('user-id-display').textContent = `Temp ID: ${userId.substring(0, 8)}...`;
+                        document.getElementById('current-role-display').textContent = `Viewing as ${userRole}`;
+                        renderApp(); 
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization or authentication failed:", error);
+                renderApp();
+            }
+        }
+
+        // --- ROLE PERSISTENCE (FIRESTORE) ---
+        
+        async function loadUserPreferences(uid, appId) {
+            const roleRef = doc(db, 'artifacts', appId, 'users', uid, ROLE_COLLECTION, 'profile');
+            document.getElementById('user-id-display').textContent = `ID: ${uid}`;
+            
+            try {
+                const docSnap = await getDoc(roleRef);
+                if (docSnap.exists()) {
+                    userRole = docSnap.data().role || 'Entrepreneur';
+                }
+            } catch (e) {
+                console.warn("Could not load user role from Firestore, defaulting:", e);
+            }
+            // Set the UI and render
+            document.getElementById('role-selector').value = userRole;
+            document.getElementById('current-role-display').textContent = `Viewing as ${userRole}`;
+            renderApp();
+        }
+
+        window.saveUserRole = async function(newRole) {
+            userRole = newRole;
+            document.getElementById('current-role-display').textContent = `Viewing as ${userRole}`;
+
+            if (userId && auth && auth.currentUser) {
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const roleRef = doc(db, 'artifacts', appId, 'users', userId, ROLE_COLLECTION, 'profile');
+                    await setDoc(roleRef, { role: newRole, lastUpdated: new Date().toISOString() }, { merge: true });
+                    console.log(`User role saved as ${newRole} to Firestore.`);
+                } catch (e) {
+                    console.error("Error saving user role to Firestore:", e);
+                }
+            }
+            // Force view to update, especially for 'create' view content
+            renderApp();
+        }
+
+        // --- NAVIGATION STATE MANAGEMENT ---
+        window.navigateTo = function(view) {
+            currentView = view;
+            renderApp();
+        }
+
+        // --- MOCK DATA ---
+        const MOCK_OPPORTUNITIES = [
+            { id: 1, type: 'Project', title: 'Synergy AI', pitch: 'AI-driven team matching platform for remote startups. Focused on reducing turnover by predicting cultural fit.', stage: 'Prototype', needs: ['Seed Funding', 'CTO'], budget: '$500K', tags: ['AI', 'SaaS', 'HRTech'] },
+            { id: 2, type: 'People', title: 'Dr. Anya Sharma', pitch: 'Data Science PhD seeking a disruptive health tech co-founder role. Expertise in advanced ML/NLP models.', role: 'Data Scientist', expertise: ['ML', 'NLP', 'Healthcare'], tags: ['DataScience', 'CoFounder', 'PhD'] },
+            { id: 3, type: 'Investor', title: 'Venture Leap Fund', pitch: 'Early-stage VC focused on B2B SaaS and Climate Tech. Check size $1M - $3M.', focus: 'SaaS, Climate', stage: 'Seed, Series A', tags: ['VC', 'Climate', 'SaaS'] },
+            { id: 4, type: 'Project', title: 'EcoFarm Ledger', pitch: 'Blockchain-based supply chain transparency for small organic farms. Increases consumer trust.', stage: 'Traction', needs: ['Series A', 'Lead Backend Dev'], budget: '$2M', tags: ['Blockchain', 'AgriTech', 'SupplyChain'] },
+            { id: 5, type: 'People', title: 'Marco Rossi', pitch: 'Product Manager with 8 years experience scaling mobile apps (1M+ users). Seeking FinTech opportunity.', role: 'Product Manager', expertise: ['Mobile', 'Strategy', 'UI/UX'], tags: ['PM', 'FinTech', 'Mobile'] },
+            { id: 6, type: 'Investor', title: 'Angel Network East', pitch: 'Global Angel group specializing in FinTech and Deep Tech. Investing $50K - $250K at Pre-Seed.', focus: 'FinTech, Deep Tech', stage: 'Pre-Seed', tags: ['Angel', 'FinTech'] },
+            { id: 7, type: 'Project', title: 'Quantum Vault', pitch: 'Post-quantum encryption solution for securing critical infrastructure data.', stage: 'Idea', needs: ['Research Partner', 'Early Funding'], budget: 'Undisclosed', tags: ['DeepTech', 'Cybersecurity', 'Quantum'] },
+            { id: 8, type: 'People', title: 'Lisa Chen', pitch: 'Full-stack developer (React/Node) looking for a remote co-founder position in EdTech.', role: 'Full Stack Dev', expertise: ['React', 'Node.js', 'EdTech'], tags: ['Developer', 'Remote', 'EdTech'] },
+            { id: 9, type: 'Investor', title: 'Impact Capital', pitch: 'Mission-driven fund focused on sustainability and social good. Must meet specific ESG criteria.', focus: 'ESG, Sustainability', stage: 'Seed', tags: ['Impact', 'ESG'] },
+        ];
+
+        // --- CORE RENDERING FUNCTIONS ---
+        
+        /**
+         * Renders the Discovery Dashboard view.
+         */
+        function renderDashboard() {
+            const searchTerm = document.getElementById('search-dashboard') ? document.getElementById('search-dashboard').value.toLowerCase().trim() : '';
+            const typeFilter = document.getElementById('type-filter-dashboard') ? document.getElementById('type-filter-dashboard').value : 'All';
+
+            const filtered = MOCK_OPPORTUNITIES.filter(opp => {
+                const matchesType = typeFilter === 'All' || opp.type === typeFilter;
+                const searchString = `${opp.title} ${opp.pitch} ${opp.tags.join(' ')} ${opp.role || ''} ${opp.focus || ''} ${opp.expertise ? opp.expertise.join(' ') : ''}`.toLowerCase();
+                const matchesSearch = searchString.includes(searchTerm);
+                return matchesType && matchesSearch;
+            });
+
+            // Card Rendering Logic (same as before)
+            const cardHtml = filtered.map(renderCard).join('');
+            
+            const dashboardHtml = `
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-6">Discover Opportunities</h2>
+                <div class="bg-white p-5 rounded-xl card-shadow mb-8 border border-gray-100">
+                    <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+                        <div class="flex-grow">
+                            <label for="search-dashboard" class="sr-only">Search</label>
+                            <div class="relative">
+                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
+                                </div>
+                                <input type="text" id="search-dashboard" oninput="renderApp()" value="${searchTerm}" placeholder="Search by keywords, industry, or role..." class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-gray-800">
+                            </div>
+                        </div>
+                        <div class="md:w-1/4">
+                            <label for="type-filter-dashboard" class="sr-only">Type</label>
+                            <select id="type-filter-dashboard" onchange="renderApp()" class="w-full py-2.5 px-4 border border-gray-300 rounded-xl bg-white text-gray-800 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="All" ${typeFilter === 'All' ? 'selected' : ''}>All Types</option>
+                                <option value="Project" ${typeFilter === 'Project' ? 'selected' : ''}>Projects</option>
+                                <option value="People" ${typeFilter === 'People' ? 'selected' : ''}>Talent</option>
+                                <option value="Investor" ${typeFilter === 'Investor' ? 'selected' : ''}>Investors</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="opportunity-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+                    ${cardHtml.length > 0 ? cardHtml : `
+                        <div class="lg:col-span-2 text-center py-16">
+                            <i data-lucide="frown" class="w-12 h-12 mx-auto text-gray-400"></i>
+                            <h3 class="mt-2 text-xl font-medium text-gray-900">No opportunities found</h3>
+                            <p class="mt-1 text-gray-500">Try adjusting your search query or filters.</p>
+                        </div>
+                    `}
+                </div>
+            `;
+            return dashboardHtml;
+        }
+
+        /**
+         * Renders the Create Opportunity form based on the user's role.
+         */
+        function renderCreateForm() {
+            let formTitle, formDescription, formFields;
+
+            const baseFields = `
+                <div class="col-span-full">
+                    <label for="title" class="block text-sm font-medium text-gray-700">Title / Name</label>
+                    <input type="text" id="title" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div class="col-span-full">
+                    <label for="pitch" class="block text-sm font-medium text-gray-700">One-Sentence Pitch / Tagline</label>
+                    <input type="text" id="pitch" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div class="col-span-full">
+                    <label for="description" class="block text-sm font-medium text-gray-700">Detailed Description / Bio</label>
+                    <textarea id="description" rows="4" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </div>
+                <div class="col-span-full sm:col-span-3">
+                    <label for="tags" class="block text-sm font-medium text-gray-700">Keywords/Tags (Comma Separated)</label>
+                    <input type="text" id="tags" placeholder="e.g., SaaS, FinTech, B2B" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+            `;
+
+            if (userRole === 'Entrepreneur') {
+                formTitle = 'Post a Project (Seeking Talent & Funding)';
+                formDescription = 'Describe your idea and what you need to scale.';
+                formFields = `
+                    ${baseFields}
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="stage" class="block text-sm font-medium text-gray-700">Current Stage</label>
+                        <select id="stage" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            <option>Idea</option>
+                            <option>Prototype</option>
+                            <option>Traction</option>
+                        </select>
+                    </div>
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="needs" class="block text-sm font-medium text-gray-700">What do you primarily need?</label>
+                        <input type="text" id="needs" placeholder="e.g., Seed Funding, Lead Developer, Marketing Expert" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                `;
+            } else if (userRole === 'Investor') {
+                formTitle = 'Define Your Investment Thesis (Seeking Dealflow)';
+                formDescription = 'Tell entrepreneurs what kind of opportunities you are looking to fund.';
+                formFields = `
+                    ${baseFields}
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="focus" class="block text-sm font-medium text-gray-700">Industry Focus</label>
+                        <input type="text" id="focus" placeholder="e.g., SaaS, Climate Tech, Healthcare" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="stage-focus" class="block text-sm font-medium text-gray-700">Preferred Stage</label>
+                        <input type="text" id="stage-focus" placeholder="e.g., Pre-Seed, Seed, Series A" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                `;
+            } else if (userRole === 'Collaborator') {
+                formTitle = 'Create a Talent Profile (Seeking a Team/Role)';
+                formDescription = 'Highlight your skills and what type of project you want to join.';
+                formFields = `
+                    ${baseFields}
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="role" class="block text-sm font-medium text-gray-700">Desired Role</label>
+                        <input type="text" id="role" placeholder="e.g., Lead Engineer, Product Manager, Co-founder" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="col-span-full sm:col-span-3">
+                        <label for="expertise" class="block text-sm font-medium text-gray-700">Technical Expertise (Comma Separated)</label>
+                        <input type="text" id="expertise" placeholder="e.g., React, Node.js, ML, Finance" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                `;
+            }
+
+            const formHtml = `
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-2">${formTitle}</h2>
+                <p class="text-gray-600 mb-8">${formDescription}</p>
+
+                <div class="bg-white p-8 rounded-xl card-shadow border border-gray-100">
+                    <form onsubmit="event.preventDefault(); handleFormSubmission('${userRole}')" class="grid grid-cols-6 gap-6">
+                        ${formFields}
+                        <div class="col-span-full mt-4 flex justify-end">
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-xl transition duration-300 card-shadow">
+                                Submit ${userRole === 'Entrepreneur' ? 'Project' : userRole === 'Investor' ? 'Thesis' : 'Profile'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            return formHtml;
+        }
+
+        /**
+         * Renders the My Profile view.
+         */
+        function renderProfileView() {
+            const profileHtml = `
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-6">My Synergy Nexus Profile</h2>
+                <div class="bg-white p-8 rounded-xl card-shadow border border-gray-100 space-y-6">
+                    <h3 class="text-xl font-bold text-gray-800">Account Details</h3>
+                    <div class="grid grid-cols-2 gap-4 text-gray-700 border-b pb-4">
+                        <div class="font-medium">User ID:</div>
+                        <div class="break-all">${userId || 'Loading...'}</div>
+                        <div class="font-medium">Current Role:</div>
+                        <div class="text-indigo-600 font-bold">${userRole}</div>
+                    </div>
+                    
+                    <h3 class="text-xl font-bold text-gray-800">My Opportunities</h3>
+                    <div class="text-gray-500">
+                        This section would display projects you've posted (as an Entrepreneur), people you've messaged, or deals you've funded. 
+                        <p class="mt-2">Since this is a mock prototype, we are simulating the content:</p>
+                        <ul class="list-disc list-inside mt-2 ml-4 space-y-1">
+                            <li>You are currently viewing all opportunities through the <strong>Discover</strong> view.</li>
+                            <li>Your primary action is to use the <strong>Create Opportunity</strong> view to post your own listing.</li>
+                        </ul>
+                    </div>
+                    
+                    <button onclick="alert('Simulated action: Editing Profile Settings')" 
+                            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-xl transition duration-300 mt-4">
+                        Edit Settings
+                    </button>
+                </div>
+            `;
+            return profileHtml;
+        }
+
+
+        // --- MAIN APPLICATION RENDERER ---
+        window.renderApp = function() {
+            const container = document.getElementById('content-container');
+            
+            // 1. Update Navigation Menu highlight
+            ['dashboard', 'create', 'profile'].forEach(view => {
+                const button = document.getElementById(`nav-${view}`);
+                if (button) {
+                    button.classList.toggle('nav-active', currentView === view);
+                    button.querySelector('i').classList.toggle('text-white', currentView === view);
+                    button.querySelector('i').classList.toggle('text-gray-500', currentView !== view);
+                }
+            });
+
+            // 2. Render Content based on currentView
+            let content = '';
+            if (currentView === 'dashboard') {
+                content = renderDashboard();
+            } else if (currentView === 'create') {
+                content = renderCreateForm();
+            } else if (currentView === 'profile') {
+                content = renderProfileView();
+            }
+            container.innerHTML = content;
+            
+            // 3. Re-render Lucide icons
+            lucide.createIcons();
+        }
+
+        // --- HELPER FUNCTIONS ---
+
+        /**
+         * Generates the appropriate icon based on the opportunity type.
+         */
+        function getTypeIcon(type) {
+            switch (type) {
+                case 'Project':
+                    return '<i data-lucide="zap" class="w-5 h-5 mr-2 text-blue-500"></i> Project';
+                case 'People':
+                    return '<i data-lucide="user-check" class="w-5 h-5 mr-2 text-green-500"></i> Talent';
+                case 'Investor':
+                    return '<i data-lucide="banknote" class="w-5 h-5 mr-2 text-yellow-500"></i> Investor';
+                default:
+                    return '';
+            }
+        }
+
+        /**
+         * Renders a single card based on the opportunity data.
+         */
+        function renderCard(opportunity) {
+            const { type, title, pitch, tags } = opportunity;
+            
+            let primaryDetail = '';
+            let secondaryDetail = '';
+            let buttonText = 'View Profile';
+            let iconColorClass = 'bg-blue-600'; // Button background color
+            let typeColorClass = 'bg-blue-100 text-blue-800'; // Type pill color
+            let cardClasses = 'bg-white rounded-xl p-6 card-shadow flex flex-col justify-between h-full';
+
+            // Determine details and styling based on type
+            if (type === 'Project') {
+                primaryDetail = `<span class="font-medium">${opportunity.stage} Stage</span>`;
+                secondaryDetail = `<span class="text-gray-500 text-sm">Needs: ${opportunity.needs.join(', ')}</span>`;
+                buttonText = 'Connect & Pitch';
+                iconColorClass = 'bg-indigo-600';
+            } else if (type === 'People') {
+                primaryDetail = `<span class="font-medium">${opportunity.role}</span>`;
+                secondaryDetail = `<span class="text-gray-500 text-sm">Expertise: ${opportunity.expertise.slice(0, 2).join(', ')}</span>`;
+                buttonText = 'Invite to Team';
+                iconColorClass = 'bg-green-600';
+            } else if (type === 'Investor') {
+                primaryDetail = `<span class="font-medium">${opportunity.focus} Focus</span>`;
+                secondaryDetail = `<span class="text-gray-500 text-sm">Looking for: ${opportunity.stage}</span>`;
+                buttonText = 'Submit Dealflow';
+                iconColorClass = 'bg-yellow-600';
+            }
+
+            // Highlight card based on user's selected role for better discoverability
+            if (
+                (userRole === 'Entrepreneur' && type === 'Investor') ||
+                (userRole === 'Collaborator' && type === 'Project') ||
+                (userRole === 'Investor' && type === 'Project') 
+            ) {
+                 cardClasses += ' border-2 border-indigo-500 ring-2 ring-indigo-200';
+            }
+
+
+            return `
+                <div class="${cardClasses}">
+                    <div>
+                        <div class="flex items-center mb-3">
+                            <span class="text-xs font-semibold px-3 py-1 rounded-full ${typeColorClass} flex items-center">
+                                ${getTypeIcon(type)}
+                            </span>
+                        </div>
+                        <h2 class="text-xl font-bold text-gray-900 mb-2">${title}</h2>
+                        <p class="text-gray-600 text-clip-2 mb-4 h-10">${pitch}</p>
+                        
+                        <div class="space-y-2 mb-4">
+                            <div class="flex items-center text-sm text-gray-700">
+                                <i data-lucide="briefcase" class="w-4 h-4 mr-2 text-gray-400"></i>
+                                ${primaryDetail}
+                            </div>
+                            <div class="flex items-center text-sm">
+                                <i data-lucide="info" class="w-4 h-4 mr-2 text-gray-400"></i>
+                                ${secondaryDetail}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-gray-100">
+                        <div class="mb-3 flex flex-wrap gap-2">
+                            ${tags.map(tag => `<span class="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">${tag}</span>`).join('')}
+                        </div>
+                        <button class="w-full ${iconColorClass.replace('bg-', 'hover:bg-')} ${iconColorClass} text-white font-semibold py-2 rounded-xl transition duration-300 shadow-lg"
+                                onclick="alert('Simulated action for: ${buttonText} on ${title}')">
+                            ${buttonText}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // --- FORM SUBMISSION HANDLER ---
+        window.handleFormSubmission = function(role) {
+             const title = document.getElementById('title').value;
+             // In a real app, you would gather all form data here and save it to a Firestore 'public' collection.
+             
+             alert(`Success! Simulated posting of your new opportunity.\n\nType: ${role}\nTitle: ${title || 'Untitled'}\n\nThis would now appear in the Discover feed.`);
+             
+             // Optionally navigate back to dashboard
+             navigateTo('dashboard');
+        }
+
+        // --- Custom Modal (since alert() is forbidden) ---
+        window.alert = function(message) {
+            const existingModal = document.getElementById('custom-modal');
+            if (existingModal) existingModal.remove();
+
+            const modalHtml = `
+                <div id="custom-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div class="bg-white rounded-xl max-w-sm w-full p-6 shadow-2xl transform transition-all scale-100">
+                        <h3 class="text-xl font-bold text-gray-900 mb-4">Notification</h3>
+                        <p class="text-gray-700 whitespace-pre-wrap mb-6">${message}</p>
+                        <div class="flex justify-end">
+                            <button onclick="document.getElementById('custom-modal').remove()" 
+                                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-300">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        // Initialize Firebase on page load
+        window.onload = function() {
+            initializeFirebase();
+        };
+    </script>
+</body>
+</html>
